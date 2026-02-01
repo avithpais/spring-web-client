@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir /A \"C:\\\\projects\\\\spring-web-client\")",
+      "WebSearch",
+      "Bash(mvn clean:*)",
+      "Bash(ls:*)",
+      "Bash(reg.exe query \"HKLM\\\\SOFTWARE\\\\JavaSoft\\\\Java Development Kit\")",
+      "Bash(reg.exe query \"HKLM\\\\SOFTWARE\\\\JavaSoft\\\\JDK\")",
+      "Bash(powershell.exe:*)",
+      "Bash(/c/software/openjdk-25.0.2/bin/java.exe:*)",
+      "Bash(export JAVA_HOME=/c/software/openjdk-25.0.2:*)",
+      "Bash(export PATH=\"$JAVA_HOME/bin:/c/Users/avith/.m2/wrapper/dists/apache-maven-3.9.6/bin:$PATH\")",
+      "Bash(export PATH:*)",
+      "Bash(mvn test:*)",
+      "Bash(mvn package:*)",
+      "Bash(mvn install:*)",
+      "Bash(where:*)",
+      "Bash(echo:*)",
+      "Bash(cmd.exe /c \"where mvn\")",
+      "Bash(cmd.exe /c \"where mvn.cmd\")",
+      "Bash(cmd.exe /c \"mvn -version\")",
+      "Bash(cmd.exe /c \"mvn -version && exit\")",
+      "Bash(export JAVA_HOME=\"C:/software/openjdk-25.0.2\")",
+      "Bash(export PATH=\"C:/software/apache-maven-3.9.12/bin:$JAVA_HOME/bin:$PATH\")",
+      "Bash(java:*)",
+      "Bash(mvn:*)",
+      "Bash(cmd.exe /c \"set JAVA_HOME=C:\\\\software\\\\openjdk-25.0.2 && set PATH=C:\\\\software\\\\apache-maven-3.9.12\\\\bin;C:\\\\software\\\\openjdk-25.0.2\\\\bin;%PATH% && java --version && mvn --version\":*)",
+      "Bash(cmd.exe /c \"set JAVA_HOME=C:\\\\software\\\\openjdk-25.0.2&& C:\\\\software\\\\openjdk-25.0.2\\\\bin\\\\java.exe --version\")",
+      "Bash(\"C:/software/openjdk-25.0.2/bin/java.exe\" --version)",
+      "Bash(\"C:/software/apache-maven-3.9.12/bin/mvn\" --version)",
+      "Bash(\"C:/software/apache-maven-3.9.12/bin/mvn\" -f \"C:/projects/spring-web-client/pom.xml\" clean test)",
+      "Bash(\"C:/software/apache-maven-3.9.12/bin/mvn\" -f \"C:/projects/spring-web-client/pom.xml\" clean install -q)",
+      "Bash(\"C:/software/apache-maven-3.9.12/bin/mvn\" -f \"C:/projects/spring-web-client-example-app/pom.xml\" clean test)"
+    ]
+  }
+}
