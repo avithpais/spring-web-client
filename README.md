@@ -197,6 +197,77 @@ public BearerTokenProvider bearerTokenProvider() {
 
 The filter only runs on requests that include it via `.filter(bearerTokenFilter)`. If the request already contains an `Authorization` header, the filter preserves it. If no `BearerTokenProvider` bean is registered, the filter is a no-op.
 
+## Consuming Mono Responses
+
+When `ServiceClient.execute()` returns a `Mono<T>`, clients have several options for handling the response:
+
+### Reactive (Recommended for WebFlux)
+
+Return the `Mono` directly from your controller — Spring WebFlux subscribes automatically:
+
+```java
+@GetMapping("/{id}")
+public Mono<Post> getPost(@PathVariable long id) {
+    return postService.getPost(id);  // Returns Mono<Post> from ServiceClient
+}
+```
+
+### Transform with Operators
+
+Use `map()` for synchronous transformations:
+
+```java
+public Mono<String> getPostTitle(long id) {
+    return serviceClient.execute(request)
+            .map(Post::getTitle);
+}
+```
+
+Use `flatMap()` for chaining async operations:
+
+```java
+public Mono<Post> getAndUpdate(long id) {
+    return serviceClient.execute(getRequest)
+            .flatMap(post -> {
+                post.setTitle("Updated");
+                return serviceClient.execute(updateRequest);
+            });
+}
+```
+
+### Subscribe with Callbacks
+
+For fire-and-forget scenarios or side effects:
+
+```java
+serviceClient.execute(request)
+    .subscribe(
+        result -> log.info("Success: {}", result),
+        error -> log.error("Failed", error),
+        () -> log.info("Completed")
+    );
+```
+
+### Blocking (Servlet/MVC Only)
+
+In traditional Spring MVC applications, call `.block()` to wait for the result:
+
+```java
+Post post = serviceClient.execute(request).block();
+```
+
+**WARNING:** Never use `.block()` inside a reactive pipeline or on Netty event-loop threads — it will throw `IllegalStateException`.
+
+### Error Handling
+
+```java
+serviceClient.execute(request)
+    .onErrorReturn(defaultPost)                    // Fallback value
+    .onErrorResume(e -> fetchFromCache(id))        // Fallback Mono
+    .timeout(Duration.ofSeconds(5))                // Timeout
+    .retryWhen(Retry.backoff(3, Duration.ofMillis(100)));  // Retry
+```
+
 ## API Aggregator Pattern
 
 The library is designed for services that fan out to multiple downstream APIs, aggregate responses, and return a single result. Use `Mono.zip()` for parallel calls with independent timeout budgets and filter sets:
