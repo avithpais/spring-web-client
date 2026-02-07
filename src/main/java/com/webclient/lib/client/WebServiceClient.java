@@ -33,7 +33,7 @@ import java.util.List;
  * {@code filter()} method, giving callers full control over which filters
  * run for each call.
  */
-public class WebServiceClient implements ServiceClient {
+public class WebServiceClient {
 
     private WebClient webClient;
     private RetryStrategyFactory retryStrategyFactory;
@@ -58,7 +58,6 @@ public class WebServiceClient implements ServiceClient {
     //  Public API
     // ------------------------------------------------------------------ //
 
-    @Override
     public <T> Mono<T> execute(WebServiceRequest<T> request) {
         WebClient effectiveClient = resolveWebClient(request);
         WebClient.RequestHeadersSpec<?> spec = buildRequestSpec(effectiveClient, request);

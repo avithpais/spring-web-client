@@ -1,6 +1,8 @@
 # spring-web-client
 
-A reusable Spring Boot library that wraps Spring `WebClient` with production-ready defaults: connection pooling, mutual TLS, automatic retry with exponential backoff, retriable/non-retriable exception classification, per-request filter selection, per-request timeout/retry overrides, and request correlation/logging filters.
+A reusable Spring Boot library that wraps Spring `WebClient` (reactive) and `RestClient` (synchronous) with production-ready defaults: connection pooling, mutual TLS, automatic retry with exponential backoff, retriable/non-retriable exception classification, per-request filter/interceptor selection, per-request timeout/retry overrides, and request correlation/logging.
+
+Both clients share the same underlying Reactor Netty `HttpClient`, so SSL configuration and connection pooling are configured once and used by both.
 
 ## Requirements
 
@@ -27,15 +29,15 @@ Add the dependency to your application's `pom.xml`:
 
 The library uses Spring Boot auto-configuration. Adding it to the classpath is enough — all beans are registered automatically.
 
-## Quick Start
+## Quick Start (WebClient - Reactive)
 
-Inject `ServiceClient` and the filters you need, then build a `WebServiceRequest`:
+Inject `WebServiceClient` and the filters you need, then build a `WebServiceRequest`:
 
 ```java
 @Service
 public class MyService {
 
-    @Autowired private ServiceClient serviceClient;
+    @Autowired private WebServiceClient webServiceClient;
     @Autowired private CorrelationIdFilterFunction correlationIdFilter;
     @Autowired private BearerTokenFilterFunction bearerTokenFilter;
 
@@ -53,6 +55,46 @@ public class MyService {
     }
 }
 ```
+
+## Quick Start (RestClient - Synchronous)
+
+For traditional blocking calls, inject `RestServiceClient` and the interceptors you need:
+
+```java
+@Service
+public class MyBlockingService {
+
+    @Autowired private RestServiceClient restServiceClient;
+    @Autowired private CorrelationIdInterceptor correlationIdInterceptor;
+    @Autowired private BearerTokenInterceptor bearerTokenInterceptor;
+
+    public MyResponse callDownstream() {
+        RestServiceRequest<MyResponse> request = RestServiceRequest.<MyResponse>builder()
+                .url("https://api.example.com/data")
+                .method(HttpMethod.GET)
+                .acceptType(MediaType.APPLICATION_JSON)
+                .responseType(MyResponse.class)
+                .interceptor(correlationIdInterceptor)
+                .interceptor(bearerTokenInterceptor)
+                .build();
+
+        return restServiceClient.execute(request);  // Returns T directly, not Mono<T>
+    }
+}
+```
+
+## Choosing WebClient vs RestClient
+
+| Use Case | Recommended Client |
+|----------|-------------------|
+| WebFlux applications | `WebServiceClient` |
+| High-throughput async I/O | `WebServiceClient` |
+| API aggregation with `Mono.zip()` | `WebServiceClient` |
+| Traditional Spring MVC / Servlet apps | `RestServiceClient` |
+| Simple synchronous calls | `RestServiceClient` |
+| Easier debugging (stack traces) | `RestServiceClient` |
+
+Both clients share the same connection pool, SSL configuration, and retry exception classification.
 
 ## Configuration
 
@@ -147,6 +189,45 @@ WebServiceRequest.<String>builder()
 
 When a request has filters, `WebServiceClient` applies them via `webClient.mutate()`, creating a lightweight per-request variant. When no filters are specified, the base `WebClient` is used directly with zero overhead.
 
+## Per-Request Interceptor Selection (RestClient)
+
+Similar to WebClient filters, RestClient interceptors are **not** auto-registered. Each `RestServiceRequest` declares which interceptors it needs via the builder's `interceptor()` method.
+
+The library auto-configures three `ClientHttpRequestInterceptor` beans:
+
+| Order | Bean | Description |
+|---|---|---|
+| 100 | `CorrelationIdInterceptor` | Adds `X-Correlation-Id` UUID header if not already present |
+| 200 | `BearerTokenInterceptor` | Injects `Authorization: Bearer <token>` from a `BearerTokenProvider` bean |
+| 300 | `RequestLoggingInterceptor` | Logs request/response at DEBUG level with method, URL, status, and elapsed time |
+
+### Usage
+
+```java
+@Autowired private BearerTokenInterceptor bearerTokenInterceptor;
+@Autowired private CorrelationIdInterceptor correlationIdInterceptor;
+@Autowired private RequestLoggingInterceptor loggingInterceptor;
+
+// Authenticated call — all three interceptors
+RestServiceRequest.<Post>builder()
+        .url("https://internal-api/posts/1")
+        .responseType(Post.class)
+        .interceptor(correlationIdInterceptor)
+        .interceptor(bearerTokenInterceptor)
+        .interceptor(loggingInterceptor)
+        .build();
+
+// Public call — no bearer token needed
+RestServiceRequest.<String>builder()
+        .url("https://public-api/health")
+        .responseType(String.class)
+        .interceptor(correlationIdInterceptor)
+        .interceptor(loggingInterceptor)
+        .build();
+```
+
+When a request has interceptors, `RestServiceClient` applies them via `restClient.mutate()`.
+
 ## Per-Request Timeout and Retry Overrides
 
 Global timeout/retry settings serve as defaults. Individual requests can override them:
@@ -199,7 +280,7 @@ The filter only runs on requests that include it via `.filter(bearerTokenFilter)
 
 ## Consuming Mono Responses
 
-When `ServiceClient.execute()` returns a `Mono<T>`, clients have several options for handling the response:
+When `WebServiceClient.execute()` returns a `Mono<T>`, clients have several options for handling the response:
 
 ### Reactive (Recommended for WebFlux)
 
@@ -208,7 +289,7 @@ Return the `Mono` directly from your controller — Spring WebFlux subscribes au
 ```java
 @GetMapping("/{id}")
 public Mono<Post> getPost(@PathVariable long id) {
-    return postService.getPost(id);  // Returns Mono<Post> from ServiceClient
+    return postService.getPost(id);  // Returns Mono<Post> from WebServiceClient
 }
 ```
 
@@ -327,48 +408,43 @@ public Mono<EnrichedOrder> getEnrichedOrder(long orderId) {
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  Your Application                                            │
-│                                                              │
-│  @Autowired ServiceClient serviceClient;                     │
-│  @Autowired BearerTokenFilterFunction bearerTokenFilter;     │
-│  @Autowired CorrelationIdFilterFunction correlationIdFilter;  │
-│                                                              │
-│  WebServiceRequest.builder()                                 │
-│      .url(...)                                               │
-│      .filter(correlationIdFilter)   // ← per-request         │
-│      .filter(bearerTokenFilter)     // ← per-request         │
-│      .build()                                                │
-│  serviceClient.execute(request) → Mono<T>                    │
-└───────────────────────┬──────────────────────────────────────┘
-                        │
-┌───────────────────────▼──────────────────────────────────────┐
-│  spring-web-client (auto-configured)                            │
-│                                                              │
-│  WebServiceClient                                            │
-│    ├── resolveWebClient() — applies per-request filters      │
-│    │                        via webClient.mutate()            │
-│    ├── buildRequestSpec() — builds WebClient request         │
-│    ├── handleResponse()   — deserializes response body       │
-│    ├── applyRetry()       — per-request or global retry      │
-│    └── applyTimeout()     — per-request or global timeout    │
-│                                                              │
-│  ExchangeFilterFunction beans (injectable, per-request):     │
-│    ├── CorrelationIdFilterFunction  @Order(100)              │
-│    ├── BearerTokenFilterFunction    @Order(200)              │
-│    └── RequestLoggingFilterFunction @Order(300)              │
-│                                                              │
-│  RetryStrategyFactory                                        │
-│    ├── creates Retry.backoff() specs                         │
-│    ├── filters via RetriableExceptionPredicate               │
-│    └── logs retry attempts at WARN level                     │
-│                                                              │
-│  SslConnectionFactoryInitializer                             │
-│    └── builds Netty SslContext (mTLS, truststore, alias)     │
-│                                                              │
-│  WebClientAutoConfiguration                                  │
-│    └── wires ConnectionProvider, HttpClient, WebClient       │
-└──────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│  Your Application                                                         │
+│                                                                          │
+│  REACTIVE                              SYNCHRONOUS                        │
+│  ────────                              ───────────                        │
+│  @Autowired WebServiceClient           @Autowired RestServiceClient       │
+│  WebServiceRequest.builder()           RestServiceRequest.builder()       │
+│      .filter(correlationIdFilter)          .interceptor(correlationIdInt) │
+│      .filter(bearerTokenFilter)            .interceptor(bearerTokenInt)   │
+│  webServiceClient.execute() → Mono<T>  restServiceClient.execute() → T    │
+└─────────────────────────┬────────────────────────────┬───────────────────┘
+                          │                            │
+┌─────────────────────────▼────────────────────────────▼───────────────────┐
+│  spring-web-client (auto-configured)                                      │
+│                                                                          │
+│  WebServiceClient                      RestServiceClient                  │
+│    ├── resolveWebClient()              ├── resolveRestClient()           │
+│    ├── buildRequestSpec()              ├── buildRequestSpec()            │
+│    ├── applyRetry() (reactive)         └── executeWithRetry() (sync)     │
+│    └── applyTimeout()                                                    │
+│                                                                          │
+│  WebClient filters:                    RestClient interceptors:           │
+│    ├── CorrelationIdFilterFunction     ├── CorrelationIdInterceptor      │
+│    ├── BearerTokenFilterFunction       ├── BearerTokenInterceptor        │
+│    └── RequestLoggingFilterFunction    └── RequestLoggingInterceptor     │
+│                                                                          │
+│  Shared Infrastructure:                                                   │
+│    ├── reactor.netty.http.client.HttpClient (connection pool, SSL)       │
+│    ├── SslConnectionFactoryInitializer (mTLS, truststore, alias)         │
+│    ├── HttpClientProperties (webclient.http.* configuration)             │
+│    └── BearerTokenProvider (token retrieval interface)                   │
+│                                                                          │
+│  WebClient ←──────────────────────────────→ RestClient                   │
+│  (ReactorClientHttpConnector)              (ReactorClientHttpRequestFactory)
+│         │                                           │                    │
+│         └──────────── SHARED HttpClient ────────────┘                    │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Testing
@@ -377,14 +453,14 @@ public Mono<EnrichedOrder> getEnrichedOrder(long orderId) {
 mvn clean test
 ```
 
-84 tests covering:
-- `WebServiceRequest` builder validation, immutability, and per-request filter list
-- `RetryStrategyFactory` retry counting with global and explicit parameters
-- `RetriableExceptionPredicate` classification of retriable vs non-retriable exceptions
-- `WebServiceClient` request execution, retry behavior, per-request timeout/retry overrides, per-request filter application via `webClient.mutate()`
-- `BearerTokenFilterFunction` token injection and skip-when-present logic
-- `CorrelationIdFilterFunction` header injection and preservation
-- `RequestLoggingFilterFunction` passthrough and error propagation
+127 tests covering:
+- `WebServiceRequest` and `RestServiceRequest` builder validation, immutability, and per-request filter/interceptor list
+- `RetryStrategyFactory` and `SyncRetryExecutor` retry counting with global and explicit parameters
+- `RetriableExceptionPredicate` and `SyncRetriableExceptionPredicate` classification of retriable vs non-retriable exceptions
+- `WebServiceClient` and `RestServiceClient` request execution, retry behavior, per-request timeout/retry overrides
+- `BearerTokenFilterFunction` and `BearerTokenInterceptor` token injection and skip-when-present logic
+- `CorrelationIdFilterFunction` and `CorrelationIdInterceptor` header injection and preservation
+- `RequestLoggingFilterFunction` and `RequestLoggingInterceptor` passthrough and error propagation
 - `HttpClientProperties` defaults and binding
 - `AliasSelectingX509KeyManager` and `SslConnectionFactoryInitializer` SSL configuration
 
@@ -393,22 +469,30 @@ mvn clean test
 ```
 src/main/java/com/webclient/lib/
 ├── auth/
-│   ├── BearerTokenFilterFunction.java      # @Order(200) injectable filter for token injection
+│   ├── BearerTokenFilterFunction.java      # @Order(200) WebClient filter for token injection
+│   ├── BearerTokenInterceptor.java         # @Order(200) RestClient interceptor for token injection
 │   └── BearerTokenProvider.java            # Functional interface for token retrieval
 ├── client/
-│   ├── ServiceClient.java                  # Public API interface
-│   └── WebServiceClient.java              # Implementation with SRP methods
+│   ├── WebServiceClient.java               # Reactive HTTP client (WebClient-based)
+│   └── RestServiceClient.java              # Synchronous HTTP client (RestClient-based)
 ├── config/
 │   ├── HttpClientProperties.java           # @ConfigurationProperties binding
-│   └── WebClientAutoConfiguration.java     # Auto-configuration entry point
+│   ├── WebClientAutoConfiguration.java     # Auto-config for WebClient + shared HttpClient + RestClient
+│   └── RestClientAutoConfiguration.java    # Auto-config for RestClient interceptors
 ├── filter/
-│   ├── CorrelationIdFilterFunction.java    # @Order(100) injectable filter for X-Correlation-Id
-│   └── RequestLoggingFilterFunction.java   # @Order(300) injectable filter for DEBUG logging
+│   ├── CorrelationIdFilterFunction.java    # @Order(100) WebClient filter for X-Correlation-Id
+│   └── RequestLoggingFilterFunction.java   # @Order(300) WebClient filter for DEBUG logging
+├── interceptor/
+│   ├── CorrelationIdInterceptor.java       # @Order(100) RestClient interceptor for X-Correlation-Id
+│   └── RequestLoggingInterceptor.java      # @Order(300) RestClient interceptor for DEBUG logging
 ├── model/
-│   └── WebServiceRequest.java             # Immutable request spec (builder, filters, overrides)
+│   ├── WebServiceRequest.java              # Immutable request spec for WebClient (filters)
+│   └── RestServiceRequest.java             # Immutable request spec for RestClient (interceptors)
 ├── retry/
-│   ├── RetriableExceptionPredicate.java    # Classifies retriable vs non-retriable
-│   └── RetryStrategyFactory.java           # Creates Reactor Retry specs with logging
+│   ├── RetriableExceptionPredicate.java    # Classifies retriable exceptions (WebClient)
+│   ├── RetryStrategyFactory.java           # Creates Reactor Retry specs with logging
+│   ├── SyncRetriableExceptionPredicate.java # Classifies retriable exceptions (RestClient)
+│   └── SyncRetryExecutor.java              # Synchronous retry with exponential backoff
 └── ssl/
     ├── AliasSelectingX509KeyManager.java   # Selects a specific key alias from keystore
     └── SslConnectionFactoryInitializer.java # Builds Netty SslContext

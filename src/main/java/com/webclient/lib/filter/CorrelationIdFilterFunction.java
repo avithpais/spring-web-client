@@ -9,6 +9,8 @@ import reactor.core.publisher.Mono;
 
 import java.util.UUID;
 
+import static com.webclient.lib.util.HttpHeaders.CORRELATION_ID;
+
 /**
  * {@link ExchangeFilterFunction} that adds an {@code X-Correlation-Id} header
  * to every outgoing request when one is not already present.
@@ -20,16 +22,14 @@ import java.util.UUID;
 @Order(100)
 public class CorrelationIdFilterFunction implements ExchangeFilterFunction {
 
-    public static final String CORRELATION_ID_HEADER = "X-Correlation-Id";
-
     @Override
     public Mono<ClientResponse> filter(ClientRequest request, ExchangeFunction next) {
-        if (request.headers().getFirst(CORRELATION_ID_HEADER) != null) {
+        if (request.headers().getFirst(CORRELATION_ID) != null) {
             return next.exchange(request);
         }
 
         ClientRequest tagged = ClientRequest.from(request)
-                .header(CORRELATION_ID_HEADER, UUID.randomUUID().toString())
+                .header(CORRELATION_ID, UUID.randomUUID().toString())
                 .build();
         return next.exchange(tagged);
     }

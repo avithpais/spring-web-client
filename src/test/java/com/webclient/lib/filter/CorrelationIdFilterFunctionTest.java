@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static com.webclient.lib.util.HttpHeaders.CORRELATION_ID;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -46,7 +47,7 @@ class CorrelationIdFilterFunctionTest {
         var captor = org.mockito.ArgumentCaptor.forClass(ClientRequest.class);
         verify(exchangeFunction).exchange(captor.capture());
         String correlationId = captor.getValue().headers()
-                .getFirst(CorrelationIdFilterFunction.CORRELATION_ID_HEADER);
+                .getFirst(CORRELATION_ID);
         assertNotNull(correlationId);
     }
 
@@ -55,7 +56,7 @@ class CorrelationIdFilterFunctionTest {
         ClientRequest request = ClientRequest.create(
                 org.springframework.http.HttpMethod.GET,
                 URI.create("https://example.com/api"))
-                .header(CorrelationIdFilterFunction.CORRELATION_ID_HEADER, "existing-id")
+                .header(CORRELATION_ID, "existing-id")
                 .build();
 
         StepVerifier.create(filter.filter(request, exchangeFunction))
@@ -65,6 +66,6 @@ class CorrelationIdFilterFunctionTest {
         var captor = org.mockito.ArgumentCaptor.forClass(ClientRequest.class);
         verify(exchangeFunction).exchange(captor.capture());
         assertEquals("existing-id", captor.getValue().headers()
-                .getFirst(CorrelationIdFilterFunction.CORRELATION_ID_HEADER));
+                .getFirst(CORRELATION_ID));
     }
 }

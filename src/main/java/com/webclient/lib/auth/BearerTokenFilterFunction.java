@@ -8,6 +8,8 @@ import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
 import org.springframework.web.reactive.function.client.ExchangeFunction;
 import reactor.core.publisher.Mono;
 
+import static com.webclient.lib.util.HttpHeaders.AUTHORIZATION;
+
 /**
  * {@link ExchangeFilterFunction} that injects a bearer token into each
  * outgoing request.
@@ -42,7 +44,7 @@ public class BearerTokenFilterFunction implements ExchangeFilterFunction {
             return next.exchange(request);
         }
 
-        if (request.headers().getFirst("Authorization") != null) {
+        if (request.headers().getFirst(AUTHORIZATION) != null) {
             return next.exchange(request);
         }
 
@@ -52,7 +54,7 @@ public class BearerTokenFilterFunction implements ExchangeFilterFunction {
         }
 
         ClientRequest authenticatedRequest = ClientRequest.from(request)
-                .header("Authorization", "Bearer " + token)
+                .header(AUTHORIZATION, "Bearer " + token)
                 .build();
         return next.exchange(authenticatedRequest);
     }

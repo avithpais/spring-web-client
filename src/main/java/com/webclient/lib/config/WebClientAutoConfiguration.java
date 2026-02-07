@@ -1,7 +1,6 @@
 package com.webclient.lib.config;
 
 import com.webclient.lib.auth.BearerTokenFilterFunction;
-import com.webclient.lib.client.ServiceClient;
 import com.webclient.lib.client.WebServiceClient;
 import com.webclient.lib.filter.CorrelationIdFilterFunction;
 import com.webclient.lib.filter.RequestLoggingFilterFunction;
@@ -15,7 +14,9 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.http.client.ReactorClientHttpRequestFactory;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.netty.http.client.HttpClient;
 import reactor.netty.resources.ConnectionProvider;
@@ -127,9 +128,29 @@ public class WebClientAutoConfiguration {
                 .build();
     }
 
+    /**
+     * Builds the shared {@link RestClient} <b>without</b> any interceptors.
+     * <p>
+     * Uses the same underlying {@link HttpClient} as WebClient, sharing the connection
+     * pool, SSL configuration, and timeouts.
+     * <p>
+     * Interceptors are applied per-request through {@code RestServiceRequest.builder().interceptor(...)},
+     * which calls {@code restClient.mutate()} internally. This gives callers full
+     * control over which interceptors run for each individual call.
+     */
     @Bean
-    @ConditionalOnMissingBean(ServiceClient.class)
-    public WebServiceClient serviceClient() {
+    @ConditionalOnMissingBean
+    public RestClient restClient(HttpClient webClientHttpClient) {
+        ReactorClientHttpRequestFactory requestFactory =
+                new ReactorClientHttpRequestFactory(webClientHttpClient);
+        return RestClient.builder()
+                .requestFactory(requestFactory)
+                .build();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public WebServiceClient webServiceClient() {
         return new WebServiceClient();
     }
 }
